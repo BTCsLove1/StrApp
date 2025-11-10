@@ -1,7 +1,19 @@
 import { SOROBAN_RPC_URL, STAR_TOKEN_CONTRACT_ID, TOKEN_LAUNCH_CONTRACT_ID } from '@/config/contracts';
+import {
+  Networks,
+  TransactionBuilder,
+  Contract,
+  Address as StellarAddress,
+  xdr,
+  nativeToScVal,
+  scValToNative,
+  Operation,
+  Memo,
+  BASE_FEE,
+} from '@stellar/stellar-sdk';
+import { Server } from '@stellar/stellar-sdk/rpc';
 
-// Simplified Soroban client - full implementation requires deployed contracts
-// This provides the interface without breaking the build
+const server = new Server(SOROBAN_RPC_URL);
 
 // Helper to get network passphrase based on network type
 export function getNetworkPassphrase(network: 'testnet' | 'mainnet'): string {
@@ -33,9 +45,33 @@ export async function buildMintStarPointsTransaction(
   xlmAmount: number,
   network: 'testnet' | 'mainnet' = 'testnet'
 ): Promise<string> {
-  // TODO: Implement after contract deployment
-  console.log('Building mint transaction for', publicKey, xlmAmount, 'XLM');
-  throw new Error('Contracts not yet deployed. Please deploy Soroban contracts first.');
+  if (!TOKEN_LAUNCH_CONTRACT_ID || TOKEN_LAUNCH_CONTRACT_ID.includes('SAMPLE')) {
+    throw new Error('Contracts not yet deployed. Please deploy Soroban contracts first.');
+  }
+
+  try {
+    const account = await server.getAccount(publicKey);
+    const contract = new Contract(TOKEN_LAUNCH_CONTRACT_ID);
+    
+    const amount = numberToI128(xlmAmount);
+    const to = nativeToScVal(StellarAddress.fromString(publicKey), { type: 'address' });
+
+    const tx = new TransactionBuilder(account, {
+      fee: BASE_FEE,
+      networkPassphrase: getNetworkPassphrase(network),
+    })
+      .addOperation(
+        contract.call('mint_star_points', to, amount)
+      )
+      .setTimeout(180)
+      .build();
+
+    const prepared = await server.prepareTransaction(tx);
+    return prepared.toXDR();
+  } catch (error) {
+    console.error('Error building mint transaction:', error);
+    throw new Error(`Failed to build mint transaction: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
 }
 
 /**
@@ -59,9 +95,71 @@ export async function buildCreateProjectTransaction(
   },
   network: 'testnet' | 'mainnet' = 'testnet'
 ): Promise<string> {
-  // TODO: Implement after contract deployment
-  console.log('Building create project transaction', projectData);
-  throw new Error('Contracts not yet deployed. Please deploy Soroban contracts first.');
+  if (!TOKEN_LAUNCH_CONTRACT_ID || TOKEN_LAUNCH_CONTRACT_ID.includes('SAMPLE')) {
+    throw new Error('Contracts not yet deployed. Please deploy Soroban contracts first.');
+  }
+
+  try {
+    const account = await server.getAccount(publicKey);
+    const contract = new Contract(TOKEN_LAUNCH_CONTRACT_ID);
+
+    // Convert project data to ScVals for Soroban
+    const creator = nativeToScVal(StellarAddress.fromString(publicKey), { type: 'address' });
+    const name = stringToScVal(projectData.name);
+    const symbol = stringToScVal(projectData.symbol);
+    const tokenAddress = nativeToScVal(StellarAddress.fromString(projectData.tokenAddress), { type: 'address' });
+    
+    const totalSupply = numberToI128(parseFloat(projectData.totalSupply));
+    const airdropAllocation = numberToI128((parseFloat(projectData.totalSupply) * projectData.airdropPercent) / 100);
+    const liquidityAllocation = numberToI128((parseFloat(projectData.totalSupply) * projectData.liquidityPercent) / 100);
+    const teamAllocation = numberToI128((parseFloat(projectData.totalSupply) * projectData.creatorPercent) / 100);
+    
+    const targetAmount = numberToI128(parseFloat(projectData.minimumLiquidity));
+    const pricePerToken = numberToI128(1); // Default price 1:1
+    const minContribution = numberToI128(10); // Min 10 XLM
+    const maxContribution = numberToI128(10000); // Max 10000 XLM
+    
+    const currentTime = Math.floor(Date.now() / 1000);
+    const startTime = numberToU64(currentTime);
+    const endTime = numberToU64(currentTime + (projectData.participationPeriodDays * 24 * 60 * 60));
+    
+    const vestingDuration = numberToU64(projectData.hasVesting ? (projectData.vestingPeriodDays || 0) * 24 * 60 * 60 : 0);
+    const vestingCliff = numberToU64(0);
+
+    const tx = new TransactionBuilder(account, {
+      fee: BASE_FEE,
+      networkPassphrase: getNetworkPassphrase(network),
+    })
+      .addOperation(
+        contract.call(
+          'create_project',
+          creator,
+          name,
+          symbol,
+          tokenAddress,
+          totalSupply,
+          airdropAllocation,
+          liquidityAllocation,
+          teamAllocation,
+          targetAmount,
+          pricePerToken,
+          minContribution,
+          maxContribution,
+          startTime,
+          endTime,
+          vestingDuration,
+          vestingCliff
+        )
+      )
+      .setTimeout(180)
+      .build();
+
+    const prepared = await server.prepareTransaction(tx);
+    return prepared.toXDR();
+  } catch (error) {
+    console.error('Error building create project transaction:', error);
+    throw new Error(`Failed to build create project transaction: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
 }
 
 /**
@@ -74,9 +172,41 @@ export async function buildParticipateTransaction(
   starPoints: number,
   network: 'testnet' | 'mainnet' = 'testnet'
 ): Promise<string> {
-  // TODO: Implement after contract deployment
-  console.log('Building participate transaction for project', projectId);
-  throw new Error('Contracts not yet deployed. Please deploy Soroban contracts first.');
+  if (!TOKEN_LAUNCH_CONTRACT_ID || TOKEN_LAUNCH_CONTRACT_ID.includes('SAMPLE')) {
+    throw new Error('Contracts not yet deployed. Please deploy Soroban contracts first.');
+  }
+
+  try {
+    const account = await server.getAccount(publicKey);
+    const contract = new Contract(TOKEN_LAUNCH_CONTRACT_ID);
+
+    const projectIdVal = numberToU64(projectId);
+    const participant = nativeToScVal(StellarAddress.fromString(publicKey), { type: 'address' });
+    const amount = numberToI128(0); // XLM amount
+    const starPointsToUse = numberToI128(starPoints);
+
+    const tx = new TransactionBuilder(account, {
+      fee: BASE_FEE,
+      networkPassphrase: getNetworkPassphrase(network),
+    })
+      .addOperation(
+        contract.call(
+          'participate_in_project',
+          projectIdVal,
+          participant,
+          amount,
+          starPointsToUse
+        )
+      )
+      .setTimeout(180)
+      .build();
+
+    const prepared = await server.prepareTransaction(tx);
+    return prepared.toXDR();
+  } catch (error) {
+    console.error('Error building participate transaction:', error);
+    throw new Error(`Failed to build participate transaction: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
 }
 
 /**
@@ -86,9 +216,39 @@ export async function submitTransaction(signedXDR: string): Promise<{
   hash: string;
   status: string;
 }> {
-  // TODO: Implement after contract deployment
-  console.log('Submitting transaction');
-  throw new Error('Contracts not yet deployed. Please deploy Soroban contracts first.');
+  try {
+    const tx = TransactionBuilder.fromXDR(signedXDR, getNetworkPassphrase('testnet'));
+    const response = await server.sendTransaction(tx);
+
+    if (response.status === 'PENDING' || response.status === 'DUPLICATE') {
+      let result = await server.getTransaction(response.hash);
+      
+      // Poll for transaction result
+      while (result.status === 'NOT_FOUND') {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        result = await server.getTransaction(response.hash);
+      }
+
+      if (result.status === 'SUCCESS') {
+        return {
+          hash: response.hash,
+          status: 'success',
+        };
+      } else {
+        throw new Error(`Transaction failed with status: ${result.status}`);
+      }
+    } else if (response.status === 'ERROR') {
+      throw new Error(`Transaction error: ${response.errorResult ? JSON.stringify(response.errorResult) : 'Unknown error'}`);
+    }
+
+    return {
+      hash: response.hash,
+      status: response.status.toLowerCase(),
+    };
+  } catch (error) {
+    console.error('Error submitting transaction:', error);
+    throw new Error(`Failed to submit transaction: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
 }
 
 /**
@@ -97,9 +257,35 @@ export async function submitTransaction(signedXDR: string): Promise<{
 export async function getStarPointsBalance(
   walletAddress: string
 ): Promise<number> {
-  // TODO: Implement after contract deployment
-  console.log('Querying STAR balance for', walletAddress);
-  return 0;
+  if (!TOKEN_LAUNCH_CONTRACT_ID || TOKEN_LAUNCH_CONTRACT_ID.includes('SAMPLE')) {
+    return 0;
+  }
+
+  try {
+    const contract = new Contract(TOKEN_LAUNCH_CONTRACT_ID);
+    const user = nativeToScVal(StellarAddress.fromString(walletAddress), { type: 'address' });
+
+    const sourceAccount = await server.getAccount(walletAddress);
+    const tx = new TransactionBuilder(sourceAccount, {
+      fee: BASE_FEE,
+      networkPassphrase: getNetworkPassphrase('testnet'),
+    })
+      .addOperation(contract.call('get_star_points', user))
+      .setTimeout(180)
+      .build();
+
+    const simulated = await server.simulateTransaction(tx);
+    
+    if ('result' in simulated && simulated.result) {
+      const balance = scValToNative(simulated.result.retval);
+      return Number(balance) / 10000000; // Convert from 7 decimals
+    }
+
+    return 0;
+  } catch (error) {
+    console.error('Error querying STAR balance:', error);
+    return 0;
+  }
 }
 
 /**
@@ -109,7 +295,33 @@ export async function getProjectFromChain(
   projectId: number,
   sourceAccount: string
 ): Promise<any | null> {
-  // TODO: Implement after contract deployment
-  console.log('Querying project', projectId);
-  return null;
+  if (!TOKEN_LAUNCH_CONTRACT_ID || TOKEN_LAUNCH_CONTRACT_ID.includes('SAMPLE')) {
+    return null;
+  }
+
+  try {
+    const contract = new Contract(TOKEN_LAUNCH_CONTRACT_ID);
+    const projectIdVal = numberToU64(projectId);
+
+    const account = await server.getAccount(sourceAccount);
+    const tx = new TransactionBuilder(account, {
+      fee: BASE_FEE,
+      networkPassphrase: getNetworkPassphrase('testnet'),
+    })
+      .addOperation(contract.call('get_project', projectIdVal))
+      .setTimeout(180)
+      .build();
+
+    const simulated = await server.simulateTransaction(tx);
+    
+    if ('result' in simulated && simulated.result) {
+      const project = scValToNative(simulated.result.retval);
+      return project;
+    }
+
+    return null;
+  } catch (error) {
+    console.error('Error querying project:', error);
+    return null;
+  }
 }
